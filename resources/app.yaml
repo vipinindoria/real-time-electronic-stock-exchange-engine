@@ -4,7 +4,7 @@ defaults:
 log:
   loggername: 'electronic.stock.exchange.app'
   createfile: false
-  logonconsole: true
+  logonconsole: false
   logfilename: 'eseapp.log'
   formatter: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
   filehandlerlevel: 'INFO'

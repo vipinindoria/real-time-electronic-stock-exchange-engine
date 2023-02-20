@@ -8,7 +8,7 @@ from common import kafka_utils
 
 
 # Define a function to simulate the exchange data
-def simulate_exchange_data(cfg):
+def get_exchange_data(cfg):
     return pd.read_csv(cfg.orderapp.instrument.filepath, parse_dates=['expiry'])
 
 
@@ -22,7 +22,7 @@ def display_instruments(instruments):
 def get_instrument_details(instruments):
     st.write("## Order Details")
     instrument = st.selectbox("Select an instrument", instruments["instrument"])
-    price = st.number_input("Price", value=instruments.loc[instruments["instrument"] == instrument, "price"].item())
+    price = st.number_input("Price")
     volume = st.number_input("Volume", min_value=1, value=1)
     expiry = st.time_input("Expiry Time", value=datetime.now().time())
     return {"instrument": instrument, "price": price, "volume": volume, "expiry": datetime.combine(datetime.now().date(), expiry)}
@@ -39,25 +39,36 @@ def place_order(order, exchange_data, logger, cfg, producer):
         st.error("Order expiry time has passed")
         return
     if order["price"] < exchange_data.iloc[0]["price"]:
-        st.error("Order price is lower than the current market price")
+        st.error(f"Order price is lower than the current market price {exchange_data.iloc[0]['price']}")
         return
-    exchange_data = exchange_data.to_dict('records')[0]
-    exchange_data["expiry"] = exchange_data["expiry"].strftime('%Y-%m-%d %H:%M:%S')
-    producer.produce(cfg.orderapp.kafka.topic, json.dumps(exchange_data).encode('ascii'),
+    order["expiry"] = order["expiry"].strftime('%Y-%m-%d %H:%M:%S')
+    producer.produce(cfg.orderapp.kafka.topic, json.dumps(order).encode('ascii'),
                      callback=lambda err, msg: kafka_utils.delivery_callback(err, msg, logger))
     producer.flush()
 
 
 def run(logger, cfg, producer):
-    # Simulate the exchange data
-    exchange_data = simulate_exchange_data(cfg)
+    # Get or initialize the session state
+    state = st.session_state.get("state", {
+        "exchange_data": None,
+        "instruments": None
+    })
 
-    # Display the instruments and their details
-    #display_instruments(exchange_data)
+    # Load the exchange data if it hasn't been loaded yet
+    if state["exchange_data"] is None:
+        state["exchange_data"] = get_exchange_data(cfg)
+
+    # Display the instruments if they haven't been loaded yet
+    #if state["instruments"] is None:
+    #    state["instruments"] = state["exchange_data"]["instrument"].unique()
+    #    display_instruments(state["exchange_data"])
 
     # Get the instrument details from the user
-    order = get_instrument_details(exchange_data)
+    order = get_instrument_details(state["exchange_data"])
 
     # Place the order
     if st.button("Place Order"):
-        place_order(order, exchange_data, logger, cfg, producer)
+        place_order(order, state["exchange_data"], logger, cfg, producer)
+
+    # Update the session state
+    st.session_state.state = state
