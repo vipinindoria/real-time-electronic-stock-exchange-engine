@@ -42,6 +42,7 @@ def place_order(order, exchange_data, logger, cfg, producer):
         st.error(f"Order price is lower than the current market price {exchange_data.iloc[0]['price']}")
         return
     order["expiry"] = order["expiry"].strftime('%Y-%m-%d %H:%M:%S')
+    order["order_time"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     producer.produce(cfg.orderapp.kafka.topic, json.dumps(order).encode('ascii'),
                      callback=lambda err, msg: kafka_utils.delivery_callback(err, msg, logger))
     producer.flush()
