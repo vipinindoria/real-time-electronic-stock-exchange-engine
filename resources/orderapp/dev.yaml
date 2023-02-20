@@ -1,0 +1,7 @@
+kafka:
+  topic: 'ese-orders-app'
+  consumer:
+    group.id: dev_order
+    auto.offset.reset: earliest
+instrument:
+  filepath: './data/instruments.csv'

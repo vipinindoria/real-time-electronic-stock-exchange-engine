@@ -1,0 +1,12 @@
+defaults:
+  - enviornment: localdev
+  - orderapp: dev
+log:
+  loggername: 'electronic.stock.exchange.app'
+  createfile: false
+  logonconsole: true
+  logfilename: 'eseapp.log'
+  formatter: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+  filehandlerlevel: 'INFO'
+  consoleerrorhandlerlevel: 'ERROR'
+  consoleoutputhandlerlevel: 'DEBUG'
