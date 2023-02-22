@@ -1,4 +1,5 @@
 import json
+import time
 
 import streamlit as st
 import pandas as pd
@@ -25,27 +26,42 @@ def get_instrument_details(instruments):
     price = st.number_input("Price")
     volume = st.number_input("Volume", min_value=1, value=1)
     expiry = st.time_input("Expiry Time", value=datetime.now().time())
-    return {"instrument": instrument, "price": price, "volume": volume, "expiry": datetime.combine(datetime.now().date(), expiry)}
+    buy_sell_options = ["Buy", "Sell"]
+    buy_sell = st.selectbox("Select buy/sell option", buy_sell_options)
+    return {"instrument": instrument, "price": price, "volume": volume, "expiry": datetime.combine(datetime.now().date(), expiry), "buy_sell": buy_sell}
+
+
+def get_bulk_order_details(csv_file):
+    orders = []
+    df = pd.read_csv(csv_file, parse_dates=['expiry'])
+    for _, row in df.iterrows():
+        order = {"instrument": row["instrument"], "price": row["price"], "volume": row["volume"],
+                 "expiry": row["expiry"], "buy_sell": row["buy_sell"]}
+        orders.append(order)
+    return orders
 
 
 # Define a function to place the order
 def place_order(order, exchange_data, logger, cfg, producer):
     exchange_data = exchange_data.loc[exchange_data["instrument"] == order["instrument"], :]
-
-    if len(exchange_data) == 0:
-        st.error("Invalid instrument selected")
-        return
-    if datetime.now() > exchange_data.iloc[0]["expiry"]:
-        st.error("Order expiry time has passed")
-        return
-    if order["price"] < exchange_data.iloc[0]["price"]:
-        st.error(f"Order price is lower than the current market price {exchange_data.iloc[0]['price']}")
-        return
-    order["expiry"] = order["expiry"].strftime('%Y-%m-%d %H:%M:%S')
-    order["order_time"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    producer.produce(cfg.orderapp.kafka.topic, json.dumps(order).encode('ascii'),
-                     callback=lambda err, msg: kafka_utils.delivery_callback(err, msg, logger))
-    producer.flush()
+    msg_slot = st.empty()
+    with st.spinner('Placing order...'):
+        if len(exchange_data) == 0:
+            msg_slot.error(f"Invalid instrument [{order['instrument']}] selected ")
+            return
+        if datetime.now() > order["expiry"]:
+            msg_slot.error(f"Order expiry time [{order['expiry']}] has passed for [{order['instrument']}]")
+            return
+        if order["price"] < exchange_data.iloc[0]["price"]:
+            msg_slot.error(f"Order price is lower than the current market price {exchange_data.iloc[0]['price']}")
+            return
+        order["expiry"] = order["expiry"].strftime('%Y-%m-%d %H:%M:%S')
+        order["order_time"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        producer.produce(cfg.orderapp.kafka.topic, json.dumps(order).encode('ascii'),
+                         callback=lambda err, msg: kafka_utils.delivery_callback(err, msg, logger, msg_slot))
+        producer.flush()
+        time.sleep(2)
+        msg_slot.empty()
 
 
 def run(logger, cfg, producer):
@@ -63,6 +79,15 @@ def run(logger, cfg, producer):
     #if state["instruments"] is None:
     #    state["instruments"] = state["exchange_data"]["instrument"].unique()
     #    display_instruments(state["exchange_data"])
+
+    # Allow the user to upload a CSV file
+    st.write("## Bulk Order Upload")
+    uploaded_file = st.file_uploader("Upload a CSV file", type="csv")
+    if uploaded_file is not None:
+        orders = get_bulk_order_details(uploaded_file)
+        if st.button("Place Bulk Orders"):
+            for order in orders:
+                place_order(order, state["exchange_data"], logger, cfg, producer)
 
     # Get the instrument details from the user
     order = get_instrument_details(state["exchange_data"])
