@@ -14,7 +14,7 @@ def get_instrument_data():
 
 # Define a function to generate the instrument data
 def generate_instrument_data(num_instruments, instrumentdata):
-    instruments = [f"INSTR{i}" for i in range(num_instruments)]
+    instruments = [f"INSTR{random.randint(1, num_instruments)}" for i in range(num_instruments)]
     price = []
     for instrument in instruments:
         min_price = instrumentdata.loc[instrumentdata['instrument'] == instrument, 'price'].iloc[0]
