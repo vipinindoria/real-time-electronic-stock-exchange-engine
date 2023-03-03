@@ -1,44 +1,134 @@
-from pyspark import SparkConf, SparkContext
-from pyspark.streaming import StreamingContext
-from pyspark.streaming.kafka import KafkaUtils
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import *
+from pyspark.sql.types import *
+from pyspark.sql.functions import col, expr
 
 # define the duration of each batch in seconds
-batch_duration = 5
+batch_duration = "5 seconds"
 
-# create a Spark configuration object and a Spark context
-conf = SparkConf().setAppName('Exchange Match Maker')
-sc = SparkContext(conf=conf)
-
-# create a StreamingContext with the batch duration
-ssc = StreamingContext(sc, batch_duration)
+# create a SparkSession object
+scala_version = '2.12'
+spark_version = '3.2.1'
+packages = [
+    f'org.apache.spark:spark-sql-kafka-0-10_{scala_version}:{spark_version}',
+    'org.apache.kafka:kafka-clients:3.2.1'
+]
+spark = SparkSession.builder.master("local").appName("Exchange Match Maker").config("spark.jars.packages", ",".join(packages)).getOrCreate()
 
 # define the input stream
-kafka_params = {'bootstrap.servers': 'localhost:9092'}
-input_topic = 'my_orders_topic'
-input_stream = KafkaUtils.createDirectStream(ssc, [input_topic], kafka_params)
+kafka_bootstrap_servers = "pkc-l7pr2.ap-south-1.aws.confluent.cloud:9092"
+kafka_topic = "ese-orders-app"
+kafka_access_key_id = "WZ5ZLGOOIYH3SWSS"
+kafka_secret_access_key = "2BJp3NfIFB2J7EyaoLF7tPOgode4KNqPZumL0aJKMKJ5CY56gcf+YsawkTMlbn9u"
+kafka_consumer_group = "dev_order"
+kafka_security_protocol = "SASL_SSL"
+kafka_sasl_mechanism = "PLAIN"
+kafka_sasl_jaas_config = f"org.apache.kafka.common.security.plain.PlainLoginModule required username=\"{kafka_access_key_id}\" password=\"{kafka_secret_access_key}\";"
+input_stream = spark \
+  .readStream \
+  .format("kafka") \
+  .option("kafka.bootstrap.servers", kafka_bootstrap_servers) \
+  .option("subscribe", kafka_topic) \
+  .option("kafka.security.protocol", kafka_security_protocol) \
+  .option("kafka.sasl.mechanism", kafka_sasl_mechanism) \
+  .option("kafka.sasl.jaas.config", kafka_sasl_jaas_config) \
+  .option("kafka.group.id", kafka_consumer_group) \
+  .option("startingOffsets", "latest") \
+  .load()
+
+# define the schema of the input data
+input_schema = StructType([
+    StructField("order_id", StringType(), True),
+    StructField("instrument_type", StringType(), True),
+    StructField("order_type", StringType(), True),
+    StructField("price", DoubleType(), True),
+    StructField("quantity", IntegerType(), True)
+])
+
+# parse the incoming orders
+parsed_orders = input_stream.selectExpr("CAST(value AS STRING)") \
+    .select(from_json("value", input_schema).alias("data")).select("data.*")
+
+# group the orders by instrument type
+orders_by_instrument = parsed_orders.groupBy("instrument_type")
 
 
-# define the function that processes each batch
-def process_batch(rdd):
-    # parse the incoming orders
-    orders = rdd.map(lambda x: x[1].split(',')).map(lambda x: (x[0], x[1], x[2], float(x[3]), int(x[4])))
+def match_orders(key, values, state):
+    # Extract the current state of the group
+    count = state["count"]
+    buy_orders = state["buy_orders"]
 
-    # group the orders by instrument type
-    orders_by_instrument = orders.groupBy(lambda x: x[1])
+    # Convert the input values to a pandas dataframe for easier processing
+    pdf = values.toPandas()
 
-    # match the buy and sell orders for each instrument
-    trades = orders_by_instrument.flatMapValues(lambda x: sorted(x, key=lambda y: y[3])). \
-        map(lambda x: (x[0], x[1][0], 'matched') if x[1][0][2] == 'buy' and x[1][-1][2] == 'sell' and x[1][0][3] >= x[1][-1][3] else (x[0], x[1][0], 'unmatched')). \
-        filter(lambda x: x[2] == 'matched'). \
-        zipWithIndex(). \
-        map(lambda x: (x[0][0], x[0][1], x[1]))
+    # Filter the orders to only include sell orders
+    sell_orders = pdf[pdf["order_type"] == "SELL"]
 
-    # print the trades
-    trades.pprint()
+    # Iterate over the sell orders and try to match them with existing buy orders
+    for i, sell_order in sell_orders.iterrows():
+        # Find the first buy order with a matching price and quantity
+        buy_order_index = -1
+        for j, buy_order in enumerate(buy_orders):
+            if buy_order["price"] == sell_order["price"] and buy_order["quantity"] == sell_order["quantity"]:
+                buy_order_index = j
+                break
 
-# apply the processing function to each batch in the input stream
-input_stream.foreachRDD(process_batch)
+        # If a matching buy order is found, generate a trade and remove the buy order from the state
+        if buy_order_index >= 0:
+            trade = {
+                "timestamp": expr("current_timestamp()"),
+                "instrument_type": key,
+                "buy_order_id": buy_orders[buy_order_index]["order_id"],
+                "sell_order_id": sell_order["order_id"],
+                "price": sell_order["price"],
+                "quantity": sell_order["quantity"]
+            }
+            buy_orders.pop(buy_order_index)
+            count += 1
 
-# start the StreamingContext
-ssc.start()
-ssc.awaitTermination()
+            # Emit the trade as an output row
+            yield trade
+
+    # Add the remaining buy orders to the state
+    buy_orders += pdf[pdf["order_type"] == "BUY"].to_dict("records")
+
+    # Update the state and emit a state output row
+    new_state = {
+        "count": count,
+        "buy_orders": buy_orders
+    }
+    yield new_state
+
+# Define the schema for the state data
+state_schema = StructType([
+    StructField("count", IntegerType()),
+    StructField("buy_orders", ArrayType(StructType([
+        StructField("order_id", StringType()),
+        StructField("order_type", StringType()),
+        StructField("price", DoubleType()),
+        StructField("quantity", DoubleType())
+    ])))
+])
+
+# Apply the mapGroupsWithState method to perform stateful transformations
+trades = orders_by_instrument.mapGroupsWithState(
+    mappingFunc=match_orders,
+    outputMode="update",
+    timeoutTimestamp=expr("current_timestamp()"),
+    timeoutDuration=batch_duration,
+    keyColumns=["instrument_type"],
+    valueColumns=["order_id", "order_type", "price", "quantity"],
+    stateSchema=state_schema,
+    initialState=struct(lit(0).alias("count"), array().alias("buy_orders"))
+)
+
+
+# call the match_orders function and display results on console
+output_stream = trades.selectExpr("to_json(struct(*)) AS value")
+query = output_stream.writeStream \
+    .format("console") \
+    .option("truncate", "false") \
+    .start()
+
+# wait for the stream to finish
+query.awaitTermination()
