@@ -21,4 +21,4 @@ def generate_instrument_data(num_instruments):
 
 # Generate 1000 instruments and write to a CSV file
 data = generate_instrument_data(1000)
-data.to_csv("./../data/instruments.csv", index=False)
+data.to_csv("/mnt/c/Users/vipin/work/spaassignmentdata/instruments.csv", index=False)

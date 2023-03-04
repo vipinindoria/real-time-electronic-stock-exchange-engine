@@ -2,9 +2,12 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import *
 from pyspark.sql.types import *
 from pyspark.sql.functions import col, expr
+from common import config_utils
+
+cfg = config_utils.get_config('resources', 'app.yaml')
 
 # define the duration of each batch in seconds
-batch_duration = "5 seconds"
+batch_duration = cfg.engine.kafka.batch_duration
 
 # create a SparkSession object
 scala_version = '2.12'
@@ -16,11 +19,11 @@ packages = [
 spark = SparkSession.builder.master("local").appName("Exchange Match Maker").config("spark.jars.packages", ",".join(packages)).getOrCreate()
 
 # define the input stream
-kafka_bootstrap_servers = "pkc-l7pr2.ap-south-1.aws.confluent.cloud:9092"
-kafka_topic = "ese-orders-app"
-kafka_access_key_id = "WZ5ZLGOOIYH3SWSS"
-kafka_secret_access_key = "2BJp3NfIFB2J7EyaoLF7tPOgode4KNqPZumL0aJKMKJ5CY56gcf+YsawkTMlbn9u"
-kafka_consumer_group = "dev_order"
+kafka_bootstrap_servers = cfg.enviornment.kafka["bootstrap.servers"]
+kafka_topic = cfg.engine.kafka.topic
+kafka_access_key_id = cfg.enviornment.kafka["sasl.username"]
+kafka_secret_access_key = cfg.enviornment.kafka["sasl.password"]
+kafka_consumer_group = cfg.engine.kafka.consumer["group.id"]
 kafka_security_protocol = "SASL_SSL"
 kafka_sasl_mechanism = "PLAIN"
 kafka_sasl_jaas_config = f"org.apache.kafka.common.security.plain.PlainLoginModule required username=\"{kafka_access_key_id}\" password=\"{kafka_secret_access_key}\";"

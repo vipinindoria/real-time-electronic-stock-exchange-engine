@@ -28,14 +28,15 @@ def get_instrument_details(instruments):
     expiry = st.time_input("Expiry Time", value=datetime.now().time())
     buy_sell_options = ["Buy", "Sell"]
     buy_sell = st.selectbox("Select buy/sell option", buy_sell_options)
-    return {"instrument": instrument, "price": price, "volume": volume, "expiry": datetime.combine(datetime.now().date(), expiry), "buy_sell": buy_sell}
+    order_id = f"ORDER-{instrument}-{int(time.time() * 1000)}"
+    return {"order_id": order_id, "instrument": instrument, "price": price, "volume": volume, "expiry": datetime.combine(datetime.now().date(), expiry), "buy_sell": buy_sell}
 
 
 def get_bulk_order_details(csv_file):
     orders = []
     df = pd.read_csv(csv_file, parse_dates=['expiry'])
     for _, row in df.iterrows():
-        order = {"instrument": row["instrument"], "price": row["price"], "volume": row["volume"],
+        order = {"order_id": row["order_id"], "instrument": row["instrument"], "price": row["price"], "volume": row["volume"],
                  "expiry": row["expiry"], "buy_sell": row["buy_sell"]}
         orders.append(order)
     return orders
@@ -56,11 +57,11 @@ def place_order(order, exchange_data, logger, cfg, producer):
             msg_slot.error(f"Order price is lower than the current market price {exchange_data.iloc[0]['price']}")
             return
         order["expiry"] = order["expiry"].strftime('%Y-%m-%d %H:%M:%S')
-        order["order_time"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        order["order_time"] = int(time.time()) #datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         producer.produce(cfg.orderapp.kafka.topic, json.dumps(order).encode('ascii'),
                          callback=lambda err, msg: kafka_utils.delivery_callback(err, msg, logger, msg_slot))
         producer.flush()
-        time.sleep(2)
+        #time.sleep(2)
         msg_slot.empty()
 
 

@@ -1,6 +1,7 @@
 defaults:
   - enviornment: localdev
   - orderapp: dev
+  - engine: dev
 log:
   loggername: 'electronic.stock.exchange.app'
   createfile: false

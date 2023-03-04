@@ -1,0 +1,8 @@
+kafka:
+  topic: 'ese-orders-app'
+  batch_duration: "5 seconds"
+  consumer:
+    group.id: dev_order
+    auto.offset.reset: earliest
+matchmaker:
+  filepath: './data/instruments.csv'
