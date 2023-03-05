@@ -28,7 +28,7 @@ def get_instrument_details(instruments):
     expiry = st.time_input("Expiry Time", value=datetime.now().time())
     buy_sell_options = ["Buy", "Sell"]
     buy_sell = st.selectbox("Select buy/sell option", buy_sell_options)
-    order_id = f"ORDER-{instrument}-{int(time.time() * 1000)}"
+    order_id = f"{buy_sell}-{instrument}-{int(time.time() * 1000)}"
     return {"order_id": order_id, "instrument": instrument, "price": price, "volume": volume, "expiry": datetime.combine(datetime.now().date(), expiry), "buy_sell": buy_sell}
 
 
@@ -53,12 +53,15 @@ def place_order(order, exchange_data, logger, cfg, producer):
         if datetime.now() > order["expiry"]:
             msg_slot.error(f"Order expiry time [{order['expiry']}] has passed for [{order['instrument']}]")
             return
-        if order["price"] < exchange_data.iloc[0]["price"]:
-            msg_slot.error(f"Order price is lower than the current market price {exchange_data.iloc[0]['price']}")
+        per_volume_order = round(order["price"] / order["volume"], 2)
+        per_volume_exchange = round(exchange_data.iloc[0]["price"] / exchange_data.iloc[0]["volume"], 2)
+        if per_volume_order < per_volume_exchange:
+            msg_slot.error(f"Per Volume Order price {per_volume_order} is lower than the current market per volume price {per_volume_exchange}")
             return
         order["expiry"] = order["expiry"].strftime('%Y-%m-%d %H:%M:%S')
         order["order_time"] = int(time.time()) #datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        producer.produce(cfg.orderapp.kafka.topic, json.dumps(order).encode('ascii'),
+        order["initial_order_time"] = order["order_time"]
+        producer.produce(topic=cfg.orderapp.kafka.topic, key=f"{order['order_id']}_{order['order_time']}", value=json.dumps(order).encode('ascii'),
                          callback=lambda err, msg: kafka_utils.delivery_callback(err, msg, logger, msg_slot))
         producer.flush()
         #time.sleep(2)

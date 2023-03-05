@@ -4,4 +4,6 @@ kafka:
     group.id: dev_order
     auto.offset.reset: earliest
 instrument:
-  filepath: './data/instruments.csv'
+  filepath: '/mnt/c/Users/vipin/work/spaassignmentdata/instruments.csv'
+bulkorder:
+  filepath: '/mnt/c/Users/vipin/work/spaassignmentdata/bulkorder.csv'

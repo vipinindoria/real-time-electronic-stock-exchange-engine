@@ -4,5 +4,6 @@ kafka:
   consumer:
     group.id: dev_order
     auto.offset.reset: earliest
+  checkpoint.dir: "file:///mnt/c/Users/vipin/work/spaassignmentdata/"
 matchmaker:
   filepath: './data/instruments.csv'
