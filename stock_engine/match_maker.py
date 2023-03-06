@@ -21,26 +21,45 @@ spark = SparkSession.builder.master("local").appName("Exchange Match Maker").con
 
 # define the input stream
 kafka_bootstrap_servers = cfg.enviornment.kafka["bootstrap.servers"]
-kafka_topic = cfg.engine.kafka.topic
+order_kafka_topic = cfg.engine.kafka.order_topic
+reorder_kafka_topic = cfg.engine.kafka.reorder_topic
+matched_kafka_topic = cfg.engine.kafka.matched_topic
 kafka_access_key_id = cfg.enviornment.kafka["sasl.username"]
 kafka_secret_access_key = cfg.enviornment.kafka["sasl.password"]
-kafka_consumer_group = cfg.engine.kafka.consumer["group.id"]
+order_kafka_consumer_group = cfg.engine.kafka.consumer["order.group.id"]
+reorder_kafka_consumer_group = cfg.engine.kafka.consumer["reorder.group.id"]
 kafka_producer_checkpoint_dir = cfg.engine.kafka["checkpoint.dir"]
 kafka_security_protocol = "SASL_SSL"
 kafka_sasl_mechanism = "PLAIN"
 kafka_sasl_jaas_config = f"org.apache.kafka.common.security.plain.PlainLoginModule required username=\"{kafka_access_key_id}\" password=\"{kafka_secret_access_key}\";"
-input_stream = spark \
+
+order_stream = spark \
   .readStream \
   .format("kafka") \
   .option("kafka.bootstrap.servers", kafka_bootstrap_servers) \
-  .option("subscribe", kafka_topic) \
+  .option("subscribe", order_kafka_topic) \
   .option("kafka.security.protocol", kafka_security_protocol) \
   .option("kafka.sasl.mechanism", kafka_sasl_mechanism) \
   .option("kafka.sasl.jaas.config", kafka_sasl_jaas_config) \
-  .option("kafka.group.id", kafka_consumer_group) \
+  .option("kafka.group.id", order_kafka_consumer_group) \
   .option("startingOffsets", "latest") \
   .option("failOnDataLoss", "false") \
   .load()
+
+reorder_stream = spark \
+  .readStream \
+  .format("kafka") \
+  .option("kafka.bootstrap.servers", kafka_bootstrap_servers) \
+  .option("subscribe", reorder_kafka_topic) \
+  .option("kafka.security.protocol", kafka_security_protocol) \
+  .option("kafka.sasl.mechanism", kafka_sasl_mechanism) \
+  .option("kafka.sasl.jaas.config", kafka_sasl_jaas_config) \
+  .option("kafka.group.id", reorder_kafka_consumer_group) \
+  .option("startingOffsets", "latest") \
+  .option("failOnDataLoss", "false") \
+  .load()
+
+input_stream = order_stream.union(reorder_stream)
 
 # define the schema of the input data
 input_schema = StructType([
@@ -90,7 +109,7 @@ def match_orders(order_ids, prices, volumes, buy_sells, expiries, initial_order_
                 trade_volume = min(buy_order[2], sell_order[2])
                 per_volume_buy_price = buy_order[1]/buy_order[2]
                 per_volume_sell_price = sell_order[1] / sell_order[2]
-                trades.append((buy_order[0], per_volume_buy_price, sell_order[0], per_volume_sell_price, trade_volume))
+                trades.append((buy_order[0], per_volume_buy_price, sell_order[0], per_volume_sell_price, trade_volume, datetime.now()))
                 buy_order = (buy_order[0], buy_order[1], buy_order[2] - trade_volume, buy_order[3], buy_order[4])
                 sell_order = (sell_order[0], sell_order[1], sell_order[2] - trade_volume, sell_order[3], sell_order[4])
                 remaining_sell_orders.append(sell_order)
@@ -111,7 +130,8 @@ match_orders_udf = udf(
                                                             StructField("per_volume_buy_price", DoubleType(), True), \
                                                             StructField("sell_order_id", StringType(), True), \
                                                             StructField("per_volume_sell_price", DoubleType(), True), \
-                                                            StructField("trade_volume", IntegerType(), True)]))), \
+                                                            StructField("trade_volume", IntegerType(), True), \
+                                                            StructField("execution_time", TimestampType(), True)]))), \
                 StructField("remaining_trades", ArrayType(StructType([StructField("order_id", StringType(), True), \
                                                                       StructField("volume", IntegerType(), True), \
                                                                       StructField("price", DoubleType(), True), \
@@ -130,8 +150,8 @@ match_maker_df = match_maker_df.withColumn("matches_trades", col("matches.trades
 # Creating a dataframe for matches trades
 matched_df = match_maker_df.select("window.start", "window.end", "instrument", \
                                explode(col("matches_trades")).alias("trade")) \
-                       .select("start", "end", "instrument", \
-                               col("trade.buy_order_id"), col("trade.per_volume_buy_price"), col("trade.sell_order_id"), col("trade.per_volume_sell_price"), col("trade.trade_volume"))
+                       .select("instrument", \
+                               col("trade.buy_order_id"), col("trade.per_volume_buy_price"), col("trade.sell_order_id"), col("trade.per_volume_sell_price"), col("trade.trade_volume"), col("trade.execution_time"))
 
 # Creating a dataframe for remaining trades
 remaining_df = match_maker_df.select("window.start", "window.end", "instrument", \
@@ -141,13 +161,6 @@ remaining_df = match_maker_df.select("window.start", "window.end", "instrument",
                                   col("trade.price").alias("price"), col("trade.buy_sell").alias("buy_sell"), \
                                   col("trade.order_time").alias("order_time"), col("trade.initial_order_time").alias("initial_order_time"), \
                                   col("trade.expiry").alias("expiry"))
-
-# Output the results to the console
-match_query = matched_df.writeStream \
-    .outputMode("complete") \
-    .format("console") \
-    .option("truncate", False) \
-    .start()
 
 remaining_query = remaining_df \
     .selectExpr("concat(CAST(order_id AS STRING), '_', CAST(order_time AS STRING)) AS key", "to_json(struct(*)) AS value") \
@@ -159,9 +172,29 @@ remaining_query = remaining_df \
     .option("kafka.sasl.mechanism", kafka_sasl_mechanism) \
     .option("kafka.sasl.jaas.config", kafka_sasl_jaas_config) \
     .option("checkpointLocation", kafka_producer_checkpoint_dir) \
-    .option("topic", "ese-re-orders") \
+    .option("topic", reorder_kafka_topic) \
     .start()
 
+match_query = matched_df \
+    .selectExpr("concat(CAST(buy_order_id AS STRING), '_', CAST(sell_order_id AS STRING), '_', CAST(execution_time AS STRING)) AS key", "to_json(struct(*)) AS value") \
+    .writeStream \
+    .outputMode("update") \
+    .format("kafka") \
+    .option("kafka.bootstrap.servers", kafka_bootstrap_servers) \
+    .option("kafka.security.protocol", kafka_security_protocol) \
+    .option("kafka.sasl.mechanism", kafka_sasl_mechanism) \
+    .option("kafka.sasl.jaas.config", kafka_sasl_jaas_config) \
+    .option("checkpointLocation", kafka_producer_checkpoint_dir) \
+    .option("topic", matched_kafka_topic) \
+    .start()
+
+# Output the results to the console
+display_query = remaining_df.writeStream \
+    .outputMode("append") \
+    .format("console") \
+    .option("truncate", False) \
+    .start()
+
+display_query.awaitTermination()
 match_query.awaitTermination()
-# Start the streaming query
 remaining_query.awaitTermination()

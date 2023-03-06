@@ -61,7 +61,7 @@ def place_order(order, exchange_data, logger, cfg, producer):
         order["expiry"] = order["expiry"].strftime('%Y-%m-%d %H:%M:%S')
         order["order_time"] = int(time.time()) #datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         order["initial_order_time"] = order["order_time"]
-        producer.produce(topic=cfg.orderapp.kafka.topic, key=f"{order['order_id']}_{order['order_time']}", value=json.dumps(order).encode('ascii'),
+        producer.produce(topic=cfg.orderapp.kafka.order_topic, key=f"{order['order_id']}_{order['order_time']}", value=json.dumps(order).encode('ascii'),
                          callback=lambda err, msg: kafka_utils.delivery_callback(err, msg, logger, msg_slot))
         producer.flush()
         #time.sleep(2)
