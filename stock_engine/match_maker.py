@@ -28,7 +28,8 @@ kafka_access_key_id = cfg.enviornment.kafka["sasl.username"]
 kafka_secret_access_key = cfg.enviornment.kafka["sasl.password"]
 order_kafka_consumer_group = cfg.engine.kafka.consumer["order.group.id"]
 reorder_kafka_consumer_group = cfg.engine.kafka.consumer["reorder.group.id"]
-kafka_producer_checkpoint_dir = cfg.engine.kafka["checkpoint.dir"]
+kafka_reorder_producer_checkpoint_dir = cfg.engine.kafka["reorder.checkpoint.dir"]
+kafka_matched_producer_checkpoint_dir = cfg.engine.kafka["matched.checkpoint.dir"]
 kafka_security_protocol = "SASL_SSL"
 kafka_sasl_mechanism = "PLAIN"
 kafka_sasl_jaas_config = f"org.apache.kafka.common.security.plain.PlainLoginModule required username=\"{kafka_access_key_id}\" password=\"{kafka_secret_access_key}\";"
@@ -44,6 +45,7 @@ order_stream = spark \
   .option("kafka.group.id", order_kafka_consumer_group) \
   .option("startingOffsets", "latest") \
   .option("failOnDataLoss", "false") \
+  .option("max.poll.interval.ms", 60000) \
   .load()
 
 reorder_stream = spark \
@@ -57,6 +59,7 @@ reorder_stream = spark \
   .option("kafka.group.id", reorder_kafka_consumer_group) \
   .option("startingOffsets", "latest") \
   .option("failOnDataLoss", "false") \
+  .option("max.poll.interval.ms", 60000) \
   .load()
 
 input_stream = order_stream.union(reorder_stream)
@@ -77,9 +80,14 @@ input_schema = StructType([
 parsed_orders = input_stream.selectExpr("CAST(value AS STRING)") \
     .select(from_json("value", input_schema).alias("data")).select("data.*")
 
+# Define the window duration and sliding interval and watermark
+watermarkDuration = "10 minutes"
+windowDuration = "2 minutes"
+slidingInterval = "1 minutes"
+
 df = parsed_orders \
-  .withWatermark("order_time", "10 minutes") \
-  .groupBy(window("order_time", "10 minutes", "5 minutes"), "instrument") \
+  .withWatermark("order_time", watermarkDuration) \
+  .groupBy(window("order_time", windowDuration, slidingInterval), "instrument") \
   .agg(collect_list(col("order_id")).alias("order_ids"), collect_list(col("price")).alias("prices"), \
        collect_list(col("volume")).alias("volumes"), collect_list(col("buy_sell")).alias("buy_sells"), \
        collect_list(col("expiry")).alias("expiries"), collect_list(col("initial_order_time")).alias("initial_order_times"))
@@ -162,6 +170,7 @@ remaining_df = match_maker_df.select("window.start", "window.end", "instrument",
                                   col("trade.order_time").alias("order_time"), col("trade.initial_order_time").alias("initial_order_time"), \
                                   col("trade.expiry").alias("expiry"))
 
+
 remaining_query = remaining_df \
     .selectExpr("concat(CAST(order_id AS STRING), '_', CAST(order_time AS STRING)) AS key", "to_json(struct(*)) AS value") \
     .writeStream \
@@ -171,7 +180,7 @@ remaining_query = remaining_df \
     .option("kafka.security.protocol", kafka_security_protocol) \
     .option("kafka.sasl.mechanism", kafka_sasl_mechanism) \
     .option("kafka.sasl.jaas.config", kafka_sasl_jaas_config) \
-    .option("checkpointLocation", kafka_producer_checkpoint_dir) \
+    .option("checkpointLocation", kafka_reorder_producer_checkpoint_dir) \
     .option("topic", reorder_kafka_topic) \
     .start()
 
@@ -184,17 +193,17 @@ match_query = matched_df \
     .option("kafka.security.protocol", kafka_security_protocol) \
     .option("kafka.sasl.mechanism", kafka_sasl_mechanism) \
     .option("kafka.sasl.jaas.config", kafka_sasl_jaas_config) \
-    .option("checkpointLocation", kafka_producer_checkpoint_dir) \
+    .option("checkpointLocation", kafka_matched_producer_checkpoint_dir) \
     .option("topic", matched_kafka_topic) \
     .start()
 
 # Output the results to the console
-display_query = remaining_df.writeStream \
+display_query = match_maker_df.writeStream \
     .outputMode("append") \
     .format("console") \
     .option("truncate", False) \
     .start()
 
 display_query.awaitTermination()
-match_query.awaitTermination()
 remaining_query.awaitTermination()
+match_query.awaitTermination()

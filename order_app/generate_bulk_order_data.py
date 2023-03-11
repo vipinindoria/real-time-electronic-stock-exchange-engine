@@ -40,12 +40,12 @@ def generate_instrument_data(num_instruments, instrumentdata):
         "instrument": instruments,
         "price": price,
         "volume": volumes,
-        "expiry": [datetime.now() + timedelta(days=0, hours=random.randint(0, 0), minutes=random.randint(5, 15), seconds=random.randint(0, 0)) for i in range(num_instruments)],
+        "expiry": [datetime.now() + timedelta(days=0, hours=random.randint(1, 2), minutes=random.randint(15, 30), seconds=random.randint(0, 0)) for i in range(num_instruments)],
         "buy_sell": buy_sell_list
     }
     return pd.DataFrame(data)
 
 
 # Generate 1000 instruments and write to a CSV file
-data = generate_instrument_data(10000, get_instrument_data())
+data = generate_instrument_data(50000, get_instrument_data())
 data.to_csv(cfg.orderapp.bulkorder.filepath, index=False)

@@ -16,7 +16,7 @@ def generate_instrument_data(num_instruments):
         "instrument": [f"INSTR{i}" for i in range(num_instruments)],
         "price": [round(random.uniform(1, 10000), 2) for i in range(num_instruments)],
         "volume": [random.randint(1, 1000) for i in range(num_instruments)],
-        "expiry": [datetime.now() + timedelta(days=0, hours=random.randint(1, 8), minutes=random.randint(0, 0), seconds=random.randint(0, 0)) for i in range(num_instruments)]
+        "expiry": [datetime.now() + timedelta(days=0, hours=random.randint(1, 4), minutes=random.randint(0, 0), seconds=random.randint(0, 0)) for i in range(num_instruments)]
     }
     return pd.DataFrame(data)
 

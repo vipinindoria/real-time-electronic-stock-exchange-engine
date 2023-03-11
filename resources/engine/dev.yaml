@@ -2,11 +2,19 @@ kafka:
   order_topic: 'ese-orders-app'
   reorder_topic: 'ese-re-orders'
   matched_topic: 'ese-matched-orders'
+  sma_topic: 'sma-app'
+  pc_topic: 'pc-app'
   batch_duration: "5 seconds"
   consumer:
-    order.group.id: dev_order
-    reorder.group.id: dev_reorder
+    order.group.id: ese-order-grp
+    reorder.group.id: ese-reorder-grp
+    matched.group.id: ese-matched-grp
+    sma.group.id: ese-sma-grp
+    pc.group.id: ese-pc-grp
     auto.offset.reset: earliest
-  checkpoint.dir: "file:///mnt/c/Users/vipin/work/spaassignmentdata/"
+  reorder.checkpoint.dir: "file:///mnt/c/Users/vipin/work/spaassignmentdata/reorder_ckpt/"
+  matched.checkpoint.dir: "file:///mnt/c/Users/vipin/work/spaassignmentdata/matched_ckpt/"
+  sma.checkpoint.dir: "file:///mnt/c/Users/vipin/work/spaassignmentdata/sma_ckpt/"
+  pc.checkpoint.dir: "file:///mnt/c/Users/vipin/work/spaassignmentdata/pc_ckpt/"
 matchmaker:
   filepath: './data/instruments.csv'

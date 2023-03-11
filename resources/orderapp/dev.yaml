@@ -2,9 +2,14 @@ kafka:
   order_topic: 'ese-orders-app'
   reorder_topic: 'ese-re-orders'
   matched_topic: 'ese-matched-orders'
+  sma_topic: 'sma-app'
+  pc_topic: 'pc-app'
   consumer:
-    order.group.id: dev_order
-    reorder.group.id: dev_order
+    order.group.id: ese-order-grp
+    reorder.group.id: ese-reorder-grp
+    matched.group.id: ese-matched-grp
+    sma.group.id: ese-sma-grp
+    pc.group.id: ese-pc-grp
     auto.offset.reset: earliest
 instrument:
   filepath: '/mnt/c/Users/vipin/work/spaassignmentdata/instruments.csv'
