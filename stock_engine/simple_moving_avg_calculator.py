@@ -64,8 +64,8 @@ parsed_orders = matched_order_stream.selectExpr("CAST(value AS STRING)") \
 
 # Define the window duration and sliding interval
 watermarkDuration = "10 minutes"
-windowDuration = "50 minutes"
-slidingInterval = "1 minutes"
+windowDuration = "10 minutes"
+slidingInterval = "5 minutes"
 
 # Calculate the SMA closing price of each instrument in the sliding window
 sma_df = parsed_orders \

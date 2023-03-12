@@ -82,8 +82,8 @@ parsed_orders = input_stream.selectExpr("CAST(value AS STRING)") \
 
 # Define the window duration and sliding interval and watermark
 watermarkDuration = "10 minutes"
-windowDuration = "2 minutes"
-slidingInterval = "1 minutes"
+windowDuration = "10 minutes"
+slidingInterval = "5 minutes"
 
 df = parsed_orders \
   .withWatermark("order_time", watermarkDuration) \

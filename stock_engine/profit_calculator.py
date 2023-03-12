@@ -19,7 +19,7 @@ packages = [
     f'org.apache.spark:spark-sql-kafka-0-10_{scala_version}:{spark_version}',
     'org.apache.kafka:kafka-clients:3.2.1'
 ]
-spark = SparkSession.builder.master("local").appName("SMA Calculation").config("spark.jars.packages", ",".join(packages)).getOrCreate()
+spark = SparkSession.builder.master("local").appName("Stock Profit Calculator").config("spark.jars.packages", ",".join(packages)).getOrCreate()
 
 # define the input stream
 kafka_bootstrap_servers = cfg.enviornment.kafka["bootstrap.servers"]
@@ -64,20 +64,21 @@ parsed_orders = matched_order_stream.selectExpr("CAST(value AS STRING)") \
 
 # Define the window duration and sliding interval
 watermarkDuration = "10 minutes"
-windowDuration = "50 minutes"
-slidingInterval = "1 minutes"
+windowDuration = "10 minutes"
+slidingInterval = "5 minutes"
 
 # Calculate the SMA closing price of each instrument in the sliding window
-sma_df = parsed_orders \
+profit_df = parsed_orders \
     .groupBy("instrument", window("execution_time", windowDuration, slidingInterval)) \
-    .agg(avg("per_volume_buy_price").alias("sma_price"))\
-    .orderBy(["window.start", "sma_price"], ascending=[False, False])
+    .agg(avg("per_volume_sell_price").alias("opening_sma_price"), avg("per_volume_buy_price").alias("closing_sma_price")) \
+    .withColumn("profit", col("closing_sma_price") - col("opening_sma_price")) \
+    .orderBy(["window.start", "profit"], ascending=[False, False])
 
-result_df = sma_df.select("instrument", "sma_price", col("window.start").alias("w_start_time"), col("window.end").alias("w_end_time"))\
-    .limit(4)
+result_df = profit_df.select("instrument", "profit", "closing_sma_price", "opening_sma_price", col("window.start").alias("w_start_time"), col("window.end").alias("w_end_time"))\
+    .limit(1)
 
 
-sma_query = result_df \
+profit_query = result_df \
     .selectExpr("concat(CAST(instrument AS STRING), '_', CAST(w_start_time AS STRING), '_', CAST(w_end_time AS STRING)) AS key", "to_json(struct(*)) AS value") \
     .writeStream \
     .outputMode("complete") \
@@ -99,4 +100,4 @@ display_query = result_df.writeStream \
     .start()
 
 display_query.awaitTermination()
-sma_query.awaitTermination()
+profit_query.awaitTermination()
